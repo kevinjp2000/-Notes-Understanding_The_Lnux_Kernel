@@ -240,7 +240,11 @@
 			->irq_count 用于诊断
 			->irqs_unhandled 用于诊断
 			->lock 串行访问IRQ描述符合PIC的自旋锁
-2.硬中断请求栈：每个CPU都有一个硬中断请求栈，占一个页框；2.硬中断请求栈：每个CPU都有一个硬中断请求栈，占一个页框；		REPLAY		已禁用，但前一个出现的IRQ未应答
+	IRQ线标志：
+		INPROGRESS	一个处理程序正在执行
+		DISABLED	设备驱动程序故意禁用IRQ线
+		PENDING		一个IRQ已经出现在线上，页对PIC作了应答，内核还未提供服务
+		REPLAY		已禁用，但前一个出现的IRQ未应答
 		AUTODETECT	探测硬件时使用IRQ
 		WAITING		探测硬件时使用IRQ,相应中断未产生
 	irqaction描述符：
@@ -265,10 +269,36 @@
 							   2.硬中断请求栈：每个CPU都有一个硬中断请求栈，占一个页框；
 							   3.软中断请求栈：每个CPU都有一个软中断请求栈，占一个页框；
 ####为中断处理程序保存寄存器的值
+	pushl $n-256			//中断号-256保存到栈上，负数表示所有中断，正数表示系统调用
+	jmp common_interrupt
+	
+	common_interrupt:
+		SAVE_ALL
+		movl %esp,%eax	//do_IRQ函数会从eax中找到参数regs的值
+		call do_IRQ
+		jmp ret_from_intr
+		
+	SAVE_ALL宏：
+		cld
+		push %es
+		...(push了ds、eax、ebp、edi、esi、edx、ecx、ebx)//未保存eflags,cs,eip,ss,esp.因为已被硬件保存
+														//实际还少了fs和gs这2个数据段
+		movl $__USER_DS %edx
+		movl $edx,%ds	//用户数据段装入ds,es
+		movl %edx,%es
 ####do_IRQ()函数
 	__attribute__((regparm(3))) unsigned int do_IRQ(struct pt_regs *regs)
+	1.preempt_count++    //增加嵌套计数，by irq_enter()
+	2.If sizeof(thread_union) == 4kb; then 切换到硬中断强求栈。
+	3.__do_IRQ()函数；输入指针 regs 和 regs->orig_eax 中的中断号。
+	4.恢复第二部操作内容。
+	5.-irq_exit()//递减中断计数器
+	  -检查是否由可中断函数等待执行。
+	6.ret_from_intr()
 	
-###$__do_IRQ()函数
+###__do_IRQ()函数
+
+
 ###挽救丢失的中断
 ###中断服务例程
 ###IRQ线的动态分配
