@@ -1,0 +1,167 @@
+
+#进程调度
+
+
+##调度程序所使用的的数据结构
+
+###schedule()函数
+	schedule()函数的任务是从 运行队列 的 链表 中找到一个进程，并随后将cpu分配给这个进程。可以由几个内核控制路径
+调用，可以采取直接调用或延迟（lazy）调用的方法。
+
+####直接调用
+	如果current进程因不能获得必须的资源而要立刻被阻塞（比如缺页？），就直接调用调度程序，要阻塞进程的内核路径：
+	1.把current进程插入合适的等待队列：
+	2.把current进程的状态改为 TASK_INTERRUPTIBLE 或 TASK_UNINTERRUPTIBLE。
+	3.调用 schedule()。（schedule后，是不是就等待再次调度？）
+	4.检查资源是否可用，如果不可用转到第二步。
+	5.一旦资源可用，就从等待队列中删除current进程。
+	schedule把CPU分配给其他进程。当调度程序再次允许把CPU分配给这个进程时，要重新检查资源的可用性，这些步骤与
+wait_event()相似。也与chapter 3“如何组织进程”中的函数很相似。
+	许多执行长迭代任务的设备驱动程序页直接调用调度程序。每次迭代循环时，驱动程序都检查 TIF_NEED_RESCHED 标志，
+如果需要就调用 schedule() 。
+
+####延迟调用
+	可以把current进程的TIF_NEED_RESCHED标志设置为1,延迟调用。由于总是在恢复用户态进程执行之前检查这个标志的值，
+所以 schedule()将在不久之后的某个时间被调用。
+	延迟调用典型例子：a)当current进程用完了它的CPU时间片时，由schedule_tick()函数完成schedule()延迟调用。
+					  b)当一个被唤醒进程的优先级比当前进程的优先级高时，由 try_to_wake_up()函数调用。
+					  c)当发出 系统调用 sched_setscheduler()时。
+					  
+####进程切换之前 schedule()所执行的操作
+	schedule()函数的任务之一是用另外一个进程来替换当前正在执行的进程。因此该函数的关键结果是设置一个叫做next的变量，
+使它替换current进程。
+	1.禁用内核抢占 preempt_disabale()，也就是内核态进程不能被另一个进程的内核态取代;将current指针赋给prev，并把与
+本地CPUT相应的运行队列数据结构赋给rq。
+	2.保证prev不占用大内核锁：
+		if (prev->lock_depth >= 0) up(&kernel_sem);
+	3.获取现在时间，计算prev所用的CPU时间片长度( runtime =now-prev->timestamp),如果runtime>1s,会强制把runtime设为1s
+(实际单位为ns),之后 runtime /= (CURRENT_BONUS(prev)?:1)。（这部暂时不知道干嘛用的）
+	4.关掉本地中断，获得要保护运行队列的自旋锁。spin_lock_irq(&rq->lock)。
+	5.prev可能是一个正在被终止的进程(函数正在return？)。因此检查PF_DEAD标志。if(prev->flags & PF_DEAD )prev->state 
+= EXIT_DEAD。
+	6.检查prev的状态，如果不是可运行状态，且没有在内核态被抢占，就应该在运行队列删除prev进程。如果是非阻塞挂起信号，
+且状态为TASK_INTERRUPTIBLE,就把该进程的状态设为TASK_RUNNING,并插入运行队列。如果状态是 TASK_UNINTERRUPTIBLE ，就调用
+deactivate_task()从运行队列删除该进程。
+	7.检查运行队列中剩余的可运行进程数。如果有就调用 dependent_sleeper()函数。如果运行队列中午可运行进程，就调用
+idle_balance()从另外一个运行队列迁移一些可运行进程到本地运行队列(另外CPU队列)。如果idle_balance 没成功。就调用 
+wake_sleeping_depedent()重新调用空闲CPU(即每个运行swapper进程的CPU)中可运行进程。在单CPU中，选择swapper作为next进程。
+	8.假设已经肯定运行队列中有一些 可运行进程。现在检查可运行进程中是否至少有一个活动进程。若果没有，就交换运行队列
+中的active和expired。所有过期进程变为活动进程。
+	9.在活动的prio_array_t中搜索一个可运行进程。 返回本地运行进程链表的第一个进程描述符：
+	idx = sched_find_firest_bit(array->bitmap);
+	next = list_entry(array->queque[idx].next,task_t,run_list)
+	10.现在next字段存放prev进程的进程描述符指针。检查 next->activated 字段。字段编码含义如下：
+		0 TASK_RUNNING
+		1 TASK_INTERRUPTIBLE 或 TASK_STOPPED , 正在被系统调用或内核例程唤醒
+		2 TASK_INTERRUPTIBLE 或 TASK_STOPPED , 正在被系统调用或内核例程唤醒	
+		-1 TASK_UNINTERRUPTIBLE 正在被唤醒
+		如果是返回值1、2的情况，进程的睡眠时间会增加，以包含进程在运行队列中等待CPU的时间。
+	
+#### schedule()完成进程切换所执行的操作	
+ 
+	1.将立刻访问thread_info数据结构。为了改善性能，使用prefetch宏把next进程描述符第一部分字段的内容装入硬件高速缓存。
+因为 thread_info 就在进程描述符靠前字段。
+	2. 为防止以延迟方式调用schedule，清除前一个进程的 TIF_NEED_RESCHED 标志。然后函数记录CPU正在经历静止状态。还必须
+减少prev的平均睡眠时间(prev->sleep_avg -= run_time)，并把它补充给进程所使用的的时间片。然后更新进程的时间戳
+prev->timestamp = prev->last_ran = now.
+	3.如果prev和next是同一进程，就不做切换。
+	4.如果是不同进程，就调用context_switch()建立next的地址空间。
+	5.如果next 是个内核线程，它的mm是NULL,activemm是前一个进程的地址空间。next->active_mm = prev->active_mm。同时把进程
+设置为懒惰TLB模式。
+	6.调用switch_to() 进行进程切换。
+	
+####进程切换后 schedule()所执行的操作
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
