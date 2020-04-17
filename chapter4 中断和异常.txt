@@ -297,12 +297,44 @@
 	6.ret_from_intr()
 	
 ###__do_IRQ()函数
+	1.自旋锁：spinlock(&(irq_desc[irq].lock))，防止中断再次出发后在另一CPU访问共享数据。
+	2.应答PIC：irq_desc[irq].handler->ack(irq),应答PIC,应答后PIC开中断，本地CPU不进一步接受这条线中断。
+												其他CPU还是可以收到中断，因为PIC独立，所以要加锁。
+	3.设置status。根据函数所处状态设置。
+	4.检查 标志位和处理函数：if(!(status&(IRQ_DISABLED|IRQ_INPROGRESS))&&action)
+								只要不是DISABLED或INPROGRESS状态，且处理函数不为NULL,就准备执行ISR
+	5.释放 自旋锁，这样其他CPU可以设置pending状态。
+	6.执行ISR ,handle_IRQ_event();
+	7.又获取 自选锁，这样可以等待其他CPU设置新中断的PENDING。
+	8.检查 是否由新的pending，是，则循环再处理中断。
+	9.结束，解锁。irq_desc[irq].handler->end(irq).
 
-
-###挽救丢失的中断
-###中断服务例程
-###IRQ线的动态分配
-###处理器间的中断处理
+####挽救丢失的中断
+	CPU0有一条激活的中断线，且准备处理，但在应答前该IRQ被CPU1屏蔽。此时CPU0应答了中断，但不会执行ISR.
+	解决问题：内核激活IRQ线的enable_irq()函数检查是否发生了中断丢失，如发生，则强迫硬件将中断再产生一次。
+	
+####中断服务例程
+	handle_IRQ_event()-输入：irq，dev_id,regs:中断发生后随即在栈中保存字段。
+					   返回：1-成功；0-失败
+					   一般流程：1.开中断
+								 2.执行ISR,如果是共享的，就执行多个ISR.
+								 3.关中断
+								 4.返回
+####IRQ线的动态分配
+####处理器间的中断处理
+	触发：作为信号直接放在连接所有APIC的总线上的。
+	分类：1.CALL_FUNCTION_VECTOR
+			发往所有CPU(不包括发送者)，强制CPU运行传递的函数。
+		  2.RESCHEDULE_VECTOR
+			限定一个接收此中断的CPU执行。从中断返回后，
+		  3.INVALIDATE_TLB_VECTOR
+			发往所有CPU(不包括发送者)，强制他们的TLB无效，由处理程序刷新这些CPU的某些TLB。
+	
+	处理函数：call_[分类类型] 函数调用 smp_call_[分类类型]	 函数进行处理。
+	产生中断函数：send_IPI_all()
+				  send_IPI_allbutself()
+				  send_IPI_self()
+				  send_IPI_mask()
 
 ##软中断及tasklet
 	
