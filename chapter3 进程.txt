@@ -146,6 +146,10 @@
 							
 ##内核线程
 ###创建一个内核线程
+	kernel_thread()函数-输入：fn,arg,flags.
+						执行：调用 do_fork(flags|CLONE_VM|CLONE_UNTRACED,0,pregs,0,NULL,NULL)
+								CLONE_VM|CLONE_UNTRACED避免复制调用进程的页表，不被调用进程跟踪
+								pregs-内核栈地址。
 ###进程0
 ###进程1
 ###其他内核线程
