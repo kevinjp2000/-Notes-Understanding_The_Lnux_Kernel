@@ -1,20 +1,127 @@
 ﻿#进程、轻量级进程和线程
+	父子进程共享程序代码的页，但是拥有各自独立的数据拷贝。
+	现代UNIX支持多线程应用程序-拥有很多相对独立执行流的用户程序共享应用程序的大部分数据结构。
+	大部分多线程应用程序都是用pthread（POSIX）库的标准函数集编写的。
+	两个轻量级进程基本共享一些资源，如地址空间、打开的文件等。
+	LWP与线程关联起来。每个线程由内核独立调度。
+	在LINUX中，一个线程组基本上是实现了多线程应用的一组轻量级进程。
 #进程描述符
+	thread_info		进程基本信息
+	mm_struct
+	tty_struct		与进程相关的tty
+	fs_struct		当前目录
+	files_struct	指向文件描述符的指针
+	signal_struct	
 ##进程状态
+	state字段描述：
+		1.TASK_RUNNING
+			要么在CPU上执行，要么准备执行
+		2.TASK_INTERRUPTIBLE
+			硬件中断，等待资源被释放，信号都可以唤醒。
+		3.TASK_UNINTERRUPTIBLE
+			中断无法唤醒，只有资源释放才可以
+		4.TASK_STOPPED
+			收到信号暂停
+		5.TASK_TRACED
+	既存放在state字段又存放在exit_state字段中：
+		EXIT_ZOMBIE
+			进程被终止，但父进程还没发布wait4()或waitpid()系统调用返回死亡进程信息。内核不能丢弃进程描述符数据。
+		EXIT_DEAD
+	内核使用 p->state = TASK_RUNNING 或 set_task_state,set_current_state进行设置
 ##标识一个进程
+	pidmap_array 存放 已分配 和闲置的PID号。系统一直保存。
+	一个多线程应用程序所有线程拥有相同的PID。
+	线程组中所有线程与领头线程(thread group leader)拥有相同的PID。
+	getpid()返回的是tgid值。	
+	
 ###进程描述符处理
+	union thread_union{
+		struct thread_info thread_info;
+		unsigned long stack[2048];//32bit系统
+	}
 ###标识当前进程
+	current_thread_info()宏获得thread_info结构指针。
+	获得当前描述符指针是 current宏 ，等价于 current_thread_info()->task。
 ###双向链表
+	LIST_HEAD(list_name)-创建新链表，声明类型为list_head的新变量。
+	list_add(n,p)-n插入在p之后
+	list_add_tail(n,p)-n插入到p之前
+	list_del(p)-删除p指向元素
+	list_empty(p)-检查是否为空
+	list_entry(p,t,m)-返回类型为t的数据结构地址，其中t含有list_head字段，而list_head字段中有名字m和地址p
+	list_for_each(p,h)-对表头地址h指定的链表进行扫描，每次循环时，通过p返回指向list_head结构的指针
+	list_addfor_each_entry(p,h,m)-返回的是包含list_head结构的数据地址
 ###进程链表
+	SET_LINKS-插入一个进程描述符。
+	REMOVE_LINKS-删除一个进程描述符。
+	for_each_process-扫描整个进程链表。
 ###TASK_RUNNING状态的进程链表
-
+	每个进程优先级对应一个链表。运行队列链表有140个不同队列。
+	prio_array_t结构：
+		int nr_active
+		unsigned long bitmap //32bit系统,队列不为空时置位
+		struct list_head[140]  queue //头结点
+	enqueue_task(p,array)将进程描述符插入运行队列链表
+		list_add_tail(&p->run_list,&array->queue[p->prio])
+		__set_bit(p->prio,array->bitmap)
+		array->nr_active++
+		p->array = array		
+	
 ##进程间的关系
+	进程描述符中的亲属关系字段：
+		real_parent:创建了P的进程描述符。如果父进程不再存在，则指向进程1.
+		parent:当前父进程。如果子进程终止，必须向父进程发信号。
+		children:链表头部。
+		sibling:指向兄弟进程链表的下一个或前一个元素的指针。
+	进程描述符中的非亲属关系字段：
+		group_leader		进程组 的领头进程的描述符指针
+		signal->pgrp		进程组 的领头进程的PID
+		tgid				线程组 的领头进程的PID
+		signal->session		登录回话领头进程的PID
+		ptrace_children		包含被debugger程序跟踪的P的子进程
+		ptrace_list			指向所跟踪进程实际父进程链表的前一个和下一个元素
+		
 ###pidhash表及链表
-
+	内核必须能从进程的PID导出对应的进程描述符指针。比如kill();
+	顺序扫描进程链表的并检查进程描述符的pid可行但低效。因此引入4个散列表：
+	HASH表类型			描述符中的字段
+	PIDTYPE_PID			pid
+	PIDTYPE_TGID		tgid
+	PIDTYPE_PGRP		pgrp
+	PIDTYPE_SID			session
+	
+	PID->表索引：pid_hashfn宏。
+	hash的计算：(val*0x9e370001UL)>>(32-pidhash_shift)  pidhash_shift是表索引长度。
+	表索引共2047个，因此使用双向链表处理冲突的hash。
+	
 ##如何组织进程
+	没有专门为TASK_STOPPED、EXIT_ZOMBIE、EXIT_DEAD建立专门的链表。
+	
 ###等待队列
+	链表头
+	struct __wait_queue_head{
+		spinlock lock;
+		struct list_head task_list;
+		}
+	typedef struct __wait_queue_head wait_queue_head_t;
+	
+	链表中的元素为 wait_queue_t :
+	struct __wait_queue{
+		unsigned int flags;
+		struct task_struct *task;
+		wait_queue_func_t func;
+		struct list_head task_list;
+	}
+	如果多个进程互斥等待同一资源释放，那么同时唤醒多个进程就没必要。
+	有两种进程，互斥进程（flag=1），非互斥进程（flag=0）
+	
 ###等待队列的操作
-
+	开发者可以通过 init_waitqueue_func_entry()来定义唤醒函数。
+	DECLARE_WAIT_QUEUE_HEAD(name)宏第一个新等待队列的头部。
+	init_waitqueue_entry初始化动态分配队列的头变量。比如初始化变量q：
+		q->flags = 0;
+		q->task =p;
+		q->func = default_wake_function;
 
 ##进程资源限制
 
@@ -56,7 +163,7 @@
 		CLONE_PTRACE
 		CLONE_VFORK
 		CLONE_PARENT
-		CLONE_THREAD
+		CLONE_THREAD 			子进程插入父进程同一线程组，子进程共享父进程信号描述符。
 		CLONE_NEWNS
 		CLONE_SYSVSEM
 		CLONE_SETTLS
@@ -121,6 +228,8 @@
 		  14.检查 CLONE_CHILD_CLEARTID或CLONE_CHILD_SETTID标志。
 		  15.清除 TIF_SYSCALL_TRACE 标志，使 系统调用结束消息不会发给调试进程。
 		  16.初始化tsk->exit_signal :根据CLONE_FLAGS低位。
+				IF SET CLONE_THREAD THEN  tsk->exit_signal=-1;
+				只有线程组最后一个成员死亡（通常是线程组领头），才会通知线程组领头进程的父进程。
 		  17.初始化新进程调度程序数据结构-sched_fork():设置 TASK_RUNNING;
 														preempt_count = 1,禁止抢占
 														该函数在父子进程间共享父进程时间片
@@ -191,6 +300,16 @@
 	6.exit_notify():
 		1)更新父进程与子进程亲属关系。IF 同一进程组由正在运行进程 THEN 子进程成为同一线性组另一进程的子进程
 										ELSE 成为init子进程
-		2)
+		2)如果没有其他的“兄弟”，就向父进程发送SIGCHLD通知父进程死亡。
+									-条件：exit_signal=1，是所属进程组最后一个成员。
+		3)exit_signal=1 or 是所属进程组还有其他成员；只要进程被跟踪 就向父进程发送SIGCHLD通知父进程死亡。
+		4)exit_signal =-1,且未被跟踪。-> exit_state = EXIT_DEAD.
+										 release_task 回收其他进程占用内存。使进程描述符使用计数器为1，描述符
+														刚好不会释放
+		5)exit_signal != -1 or 正被跟踪。exit_state = EXIT_ZOMBIE
+		6)flags=PF_DEAD
+	7.调用schedule()函数选择新进程执行。调度程序忽略处于EXIT_ZOMBIE状态进程。
+	  在schedule()中，if(prev->flags & PF_DEAD) prev->state = EXIT_DEAD；从运行队列中删除。
+	
 
 ##进程删除
