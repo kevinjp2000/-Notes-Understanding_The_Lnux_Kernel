@@ -40,6 +40,36 @@
 						   3.vofrk()系统调用创建的进程共享父进程地址空间。为防止父进程重写子进程数据，阻塞父进程直到
 							子进程退出或执行一个新的程序。
 ##clone(),fork及vfork()系统调用
+	clone()函数-作用：创建轻量级进程,实际是c语言库的封装函数
+				输入：fn-新进程执行的函数。返回时，子进程终止。
+					  arg-传递给fn()函数的数据
+					  flags-低字节指定发送到父进程信号代码(一般是SIGCHLD)，剩余3字节给一clone标志组用于编码。
+					  child_stack:用户态堆栈指针赋给子进程的esp。调用进程总是分配新的堆栈给子进程。
+					  tls-线性局部存储段地址。为新轻量级进程定义，CLONE_SETTLS set才有意义。
+					  ptid-父进程用户态变量地址。CLONE_PARENT_SETTID set才有意义。
+					  ctid-新轻量级进程用户态变量地址。CLONE_CHILD_SETTID set才有意义。
+	clone标志：
+		CLONE_VM
+		CLONE_FS
+		CLONE_FILES
+		CLONE_SIGHAND
+		CLONE_PTRACE
+		CLONE_VFORK
+		CLONE_PARENT
+		CLONE_THREAD
+		CLONE_NEWNS
+		CLONE_SYSVSEM
+		CLONE_SETTLS
+		CLONE_PARENT_SETTID
+		CLONE_CHILD_CLEARTID
+		CLONE_DETACHED
+		CLONE_UNTRACED
+		CLONE_CHILD_SETTID
+		CLONE_STOPPED
+	传统fork()函数同过clone实现：实现方法-需要把flags参数指定为SIGCHLD,且clone标志CLONE_VM和CLONE_VFORK。
+								 完成后，父子进程暂时共享用户态堆栈。通过写时共享技术分离。
+	vfork()函数同过clone实现：实现方法-需要把flags参数指定为SIGCHLD,且clone标志清0。
+								 完成后，父子进程暂时共享用户态堆栈。通过写时共享技术分离。
 ###do_fork()函数
 ###copy_porcess()函数
 
