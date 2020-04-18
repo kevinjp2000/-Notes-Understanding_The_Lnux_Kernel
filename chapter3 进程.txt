@@ -151,13 +151,46 @@
 								CLONE_VM|CLONE_UNTRACED避免复制调用进程的页表，不被调用进程跟踪
 								pregs-内核栈地址。
 ###进程0
+	idle进程 or swapper进程，是一个内核线程，使用下列静态分配的数据结构（其他是动态）：
+		1)进程描述符-在init_task中，由INIT_TASK完成初始化；
+		2)内核态堆栈和thread_info-IN init_thread_union,由INIT_THREAD_INFO初始化
+		3)进程描述符的下列表：mm,fs,file,sig,sighand，也由宏初始化。
+		4)主内核页全局目录 IN swpper_pg_dir
+	1.start_kernel()初始化内核所需要的所有数据结构，激活中断，创建进程1：
+		kernel_thread(init,NULL,CLONE_FS|CLONE_SIGHAND)
+	2.执行cpu_idle()函数，在没有可运行进程时，才执行进程0.
+	
+	每个CPU都有一个进程0.
 ###进程1
+	1.内核态执行init(),init依次完成内核初始化。
+	2.调用execve()装入init，此时编程一个普通进程，拥有每进程内核数据结构。
+	作用：创建和监控操作系统 外层执行的所有进程的活动。
 ###其他内核线程
-
+	keventd
+	kapmd
+	kswapd
+	pdflush
+	kblocked
+	ksoftirqd
 
 #撤销进程
+	中止方式：
+		1.编程者调用exit(),通知内核释放进程所拥有的的资源。
+		2.内核强迫整个线程组死掉，基于以下2种情况：1)进程收到信号;2)内核代表进程运行时，遇到不可恢复异常。
 ##进程终止
+	1.exit_group()-封装在库函数exit()中。对应内核函数 do_group_exit
+	2.exit()-封装在pthread_exit()这类 库函数中。对应内核函数 do_exit()
 ###do_group_exit()函数
+	最终调用do_exit()函数。
 ###do_exit()函数
+	1.设置flag=PF_EXITING.
+	2.删除进程描述符 从动态定时器队列 del_timer_sync()
+	3.从进程描述符中分理除大部分数据结构，exit_mm,exit_sem,,__exit_files等，如果没有其他进程共享，则删除。
+	4.IF 执行域和可执行格式 THEN 递减计数器
+	5.把描述符exit_code字段设置成进程终止代号。
+	6.exit_notify():
+		1)更新父进程与子进程亲属关系。IF 同一进程组由正在运行进程 THEN 子进程成为同一线性组另一进程的子进程
+										ELSE 成为init子进程
+		2)
 
 ##进程删除
