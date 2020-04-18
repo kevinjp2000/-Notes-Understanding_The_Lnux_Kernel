@@ -71,6 +71,22 @@
 	vfork()函数同过clone实现：实现方法-需要把flags参数指定为SIGCHLD,且clone标志清0。
 								 完成后，父子进程暂时共享用户态堆栈。通过写时共享技术分离。
 ###do_fork()函数
+	处理clone(),fork及vfork()系统调用。
+	流程：1.分配 新PID-通过 pidmap_array.
+		  2.检查是否有其他程序跟踪父进程-通过current->ptrace
+										 处理：通过独立程序查看是否也想跟踪子进程，如果子进程不是内核线程，
+												则 SET CLONE_PTRACE
+		  3.关键步骤 copy_process()-复制进程描述符，如果资源是可用的，返回描述符地址。
+		  4.检查CLONE_STOPPED标志是否被设置。N 怎跳转到 step5。
+		  5.检查。IF NOT SET CLONE_STOPPED,THEN wake_up_new_task(),操作如下：
+			-调整父子进程调度参数
+			-根据是否在同一CPU上或父子享受同一页表，决定子进程怎样插入队列
+		  6.检查if CLONE_STOPPED THEN 子进程 TASK_STOPPED.
+		  7.检查如果父进程被跟踪，操作子进程PID.
+		  8.检查IF SET CLONE_VFORK, THEN 把父进程插入等待队列，挂起直到子进程释放。
+		  9.结束，返回子进程ID.
+			
+								   
 ###copy_porcess()函数
 
 ##内核线程
