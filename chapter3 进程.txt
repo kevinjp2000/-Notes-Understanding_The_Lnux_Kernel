@@ -100,6 +100,13 @@
 			2) 为新进程获取 进程描述符。-通过alloc_task_struct()。描述符地址--->tsk。
 			3) 获取内核栈和thread_info的空闲内存图-通过alloc_thread_info ,内存区地址--->ti。
 			4) 填充进程描述符内容-通过复制父进程描述符，然后 tsk->thread_info=ti。
+			5) 填充 thread_info -将父进程的复制到ti指向地址。
+			6) 设置新进程状态 - tsk-usage =2,表示进程描述符正在被使用且相应进程处于活动状态。
+			7) 返回描述符指针tsk.
+		  4.检查 current->signal->rlim[RLIMIT_NPROC].rlim_cur
+		  5.递增计数器 tsk-user->__count tsk_user->processes.
+		  6.检查进程数量是否超过最大值 max_threads 。总原则是内核栈占用空间不能超过物理地址 1/8，
+									但可通过 /proc/sys/kernel/threads-max 修改
 							
 ##内核线程S
 ###创建一个内核线程
