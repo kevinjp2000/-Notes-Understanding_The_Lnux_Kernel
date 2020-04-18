@@ -107,8 +107,41 @@
 		  5.递增计数器 tsk-user->__count tsk_user->processes.
 		  6.检查进程数量是否超过最大值 max_threads 。总原则是内核栈占用空间不能超过物理地址 1/8，
 									但可通过 /proc/sys/kernel/threads-max 修改
+		  7.递增使用计数器-如果实现新进程的执行域和可执行函数 in 内核模块。
+		  8.设置进程状态：1.tsk->lock_depth =-1.大内核计数。
+						  2.tsk->did_exec=0,是execve()调用次数。
+						  3.更新flags。
+		  9.设置新PID.
+		  10.检查 CLONE_PARENT_SETTID 。
+		  11.初始化list_head,自旋锁、挂起信号、定时器、时间统计表。
+		  12.复制父进程数据到新进程数据结构中。除非clone_flags
+			copy_semundo(),copy_files(),copy_fs(),copy_sighand(),copy_signal(),copy_mm(),copy_namespace().
+		  13.初始化子进程内核栈。-调用copy_thread(),使用clone时CPU寄存器的值。
+									例外：eax《-0，thread.esp=子进程内核栈基地址。
+		  14.检查 CLONE_CHILD_CLEARTID或CLONE_CHILD_SETTID标志。
+		  15.清除 TIF_SYSCALL_TRACE 标志，使 系统调用结束消息不会发给调试进程。
+		  16.初始化tsk->exit_signal :根据CLONE_FLAGS低位。
+		  17.初始化新进程调度程序数据结构-sched_fork():设置 TASK_RUNNING;
+														preempt_count = 1,禁止抢占
+														该函数在父子进程间共享父进程时间片
+		  18.设置新进程thread_info的cpu号-smp_processor_id。
+		  19.初始化亲子关系字段。
+		  20.检查 CLONE_PTRACE 字段。
+		  21.新进程描述符插入链表-SET_LINK
+		  22.检查子进程是否必须跟踪情况。如果是，插入到跟踪列表。
+		  23.将PID插入 pidhash[PIDTYPE_PID]散列表。
+		  24.检查子进程是否是领头进程（CLONE_THREAD ==0）:
+				tsk->tgid = tsk->pid
+				tsk->group_leader =tsk
+				插入子进程到3个不同类型散列表：attach_pid(),PIDTYPE_TGID,PIDTYPE_PGID,PIDTYPE_SID。
+			elseif CLONE_THREAD ==1   子进程是父进程线程组
+			    tsk->tgid = tsk->current->pid
+				tsk->group_leader =current->group_leader
+				插子进程到散列表：attach_pid(),PIDTYPE_TGID。
+		  26.递增计数器。
+		  27.返回子进程描述符指针tsk。
 							
-##内核线程S
+##内核线程
 ###创建一个内核线程
 ###进程0
 ###进程1
