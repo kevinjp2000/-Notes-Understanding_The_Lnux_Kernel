@@ -88,8 +88,20 @@
 			
 								   
 ###copy_porcess()函数
-
-##内核线程
+	作用：创建 进程描述符 及子进程需要的其他数据结构。
+	输入：同do_fork，外加子进程PID.
+	步骤：1.检查 clone_flags 标志一致性。
+			返回错误的情形：1) SET CLONE_NEWNS && SET CLONE_FS
+							2) SET CLONE_THREAD && CLONE_SIGHAND =0 同一线程组轻量级进程必须共享信号
+							3) SET CLONE_SIGHAND && CLONE_VM =0 共享信号处理程序的轻量级进程必须共享内存描述符
+		  2.检查 附加安全性-通过 security_task_create() and security_task_alloc()。钩子函数
+		  3.获取进程描述符-通过 dup_task_struct(),过程如下：
+			1) 如需要 保存 FPU\MMX\SSE/SSE2 寄存器 ---> 父进程thread_info
+			2) 为新进程获取 进程描述符。-通过alloc_task_struct()。描述符地址--->tsk。
+			3) 获取内核栈和thread_info的空闲内存图-通过alloc_thread_info ,内存区地址--->ti。
+			4) 填充进程描述符内容-通过复制父进程描述符，然后 tsk->thread_info=ti。
+							
+##内核线程S
 ###创建一个内核线程
 ###进程0
 ###进程1
